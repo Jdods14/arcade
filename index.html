@@ -9,9 +9,7 @@
       margin: 20px;
       background: #f5f5f5;
     }
-    h1 {
-      margin-bottom: 4px;
-    }
+    h1 { margin-bottom: 4px; }
     #status {
       margin-bottom: 16px;
       font-size: 0.9rem;
@@ -94,16 +92,23 @@
         player: header.indexOf("Player"),
         total: header.indexOf("Total Points"),
         overall: header.indexOf("Overall Rank"),
-        games: []
+        games: []  // each item: { name: "Game 1", pointsIdx: x, rankIdx: y }
       };
 
       header.forEach((h, i) => {
         const cleaned = h.trim();
 
-        // Detect any column ending in "Points" except "Total Points"
+        // Detect "* Points"
         if (/points$/i.test(cleaned) && cleaned.toLowerCase() !== "total points") {
-          const displayName = cleaned.replace(/Points$/i, "").trim(); // e.g. "Game 1"
-          cols.games.push({ name: displayName, idx: i });
+          const base = cleaned.replace(/Points$/i, "").trim(); // "Game 1"
+          const rankHeader = base + " Rank";
+          const rankIdx = header.indexOf(rankHeader);
+
+          cols.games.push({
+            name: base,
+            pointsIdx: i,
+            rankIdx: rankIdx
+          });
         }
       });
 
@@ -121,25 +126,27 @@
 
         const name = row[idx.player].trim();
 
-        // Dynamic per-game values
         const gameData = idx.games.map(g => {
-          const raw = row[g.idx];
-          const num = parseFloat(raw);
-          return {
-            label: g.name,            // e.g. "Game 1"
-            points: isNaN(num) ? "" : num
-          };
+          const rawPoints = row[g.pointsIdx] || "";
+          const rawRank = g.rankIdx !== -1 ? row[g.rankIdx] : "";
+
+          const pts = rawPoints.trim();
+          const rk = rawRank.trim();
+
+          let formatted = "";
+          if (pts !== "" && rk !== "") formatted = `${pts} (${rk})`;
+          else if (pts !== "") formatted = pts;
+          else formatted = "";
+
+          return { label: g.name, formatted, points: parseFloat(pts) || 0 };
         });
 
-        // Total Points
         let total = 0;
         if (idx.total !== -1) {
-          const val = parseFloat(row[idx.total]);
-          total = isNaN(val)
-            ? gameData.reduce((s, g) => s + (parseFloat(g.points) || 0), 0)
-            : val;
+          const num = parseFloat(row[idx.total]);
+          total = isNaN(num) ? gameData.reduce((s, g) => s + g.points, 0) : num;
         } else {
-          total = gameData.reduce((s, g) => s + (parseFloat(g.points) || 0), 0);
+          total = gameData.reduce((s, g) => s + g.points, 0);
         }
 
         const overall = idx.overall !== -1 ? row[idx.overall] : "";
@@ -147,7 +154,6 @@
         players.push({ name, gameData, total, overall });
       }
 
-      // Sort by total descending
       players.sort((a, b) => b.total - a.total);
 
       return { players };
@@ -155,15 +161,11 @@
 
     function addMedal(rank, cell) {
       const span = document.createElement("span");
-      if (rank === 1) {
-        span.className = "badge gold"; span.textContent = "1st";
-      } else if (rank === 2) {
-        span.className = "badge silver"; span.textContent = "2nd";
-      } else if (rank === 3) {
-        span.className = "badge bronze"; span.textContent = "3rd";
-      } else {
-        return;
-      }
+      if (rank === 1) { span.className = "badge gold"; span.textContent = "1st"; }
+      else if (rank === 2) { span.className = "badge silver"; span.textContent = "2nd"; }
+      else if (rank === 3) { span.className = "badge bronze"; span.textContent = "3rd"; }
+      else return;
+
       cell.appendChild(document.createTextNode(" "));
       cell.appendChild(span);
     }
@@ -172,7 +174,6 @@
       const headerRow = document.getElementById("header-row");
       const tbody = document.querySelector("#leaderboard-table tbody");
 
-      // Build header
       headerRow.innerHTML = `
         <th class="rank-col">#</th>
         <th class="player-col">Player</th>
@@ -182,19 +183,17 @@
       `;
 
       tbody.innerHTML = "";
-      players.forEach((p, i) => {
+      players.forEach((p, idx) => {
         const tr = document.createElement("tr");
-        const rank = i + 1;
+        const rank = idx + 1;
 
         let html = `
           <td>${rank}</td>
           <td class="player-col">${p.name}</td>
         `;
 
-        // Cell format: "Game Name (points)"
         for (const g of p.gameData) {
-          const text = g.points !== "" ? `${g.label} (${g.points})` : "";
-          html += `<td>${text}</td>`;
+          html += `<td>${g.formatted}</td>`;
         }
 
         html += `
@@ -204,9 +203,7 @@
 
         tr.innerHTML = html;
 
-        // Add medal to player name
         addMedal(rank, tr.children[1]);
-
         tbody.appendChild(tr);
       });
     }
@@ -227,11 +224,8 @@
         render(players, gameColNames);
 
         status.textContent =
-          "Last updated " +
-          new Date().toLocaleTimeString() +
-          " (auto refresh every " +
-          POLL_INTERVAL_MS / 1000 +
-          "s)";
+          "Last updated " + new Date().toLocaleTimeString() +
+          " (auto refresh every " + POLL_INTERVAL_MS / 1000 + "s)";
       } catch (err) {
         console.error(err);
         status.textContent = "Error: " + err.message;
