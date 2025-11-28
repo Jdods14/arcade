@@ -78,7 +78,7 @@
 
     async function fetchCsv() {
       const resp = await fetch(GOOGLE_SHEET_CSV_URL + "&t=" + Date.now());
-      if (!resp.ok) throw new Error("Bad HTTP status " + resp.status);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
       return await resp.text();
     }
 
@@ -90,23 +90,24 @@
     }
 
     function detectColumns(header) {
-      const indices = {
+      const cols = {
         player: header.indexOf("Player"),
         total: header.indexOf("Total Points"),
         overall: header.indexOf("Overall Rank"),
-        games: [] // { name: "Game 1", idx: colIndex }
+        games: []
       };
 
       header.forEach((h, i) => {
         const cleaned = h.trim();
+
+        // Detect any column ending in "Points" except "Total Points"
         if (/points$/i.test(cleaned) && cleaned.toLowerCase() !== "total points") {
-          // Extract the game label by removing trailing "Points"
-          const gameName = cleaned.replace(/Points$/i, "").trim();
-          indices.games.push({ name: gameName, idx: i });
+          const displayName = cleaned.replace(/Points$/i, "").trim(); // e.g. "Game 1"
+          cols.games.push({ name: displayName, idx: i });
         }
       });
 
-      return indices;
+      return cols;
     }
 
     function buildPlayers(rows) {
@@ -120,22 +121,25 @@
 
         const name = row[idx.player].trim();
 
-        // Extract all game points dynamically
+        // Dynamic per-game values
         const gameData = idx.games.map(g => {
           const raw = row[g.idx];
           const num = parseFloat(raw);
-          return { name: g.name, points: isNaN(num) ? null : num };
+          return {
+            label: g.name,            // e.g. "Game 1"
+            points: isNaN(num) ? "" : num
+          };
         });
 
-        // Total points
+        // Total Points
         let total = 0;
         if (idx.total !== -1) {
-          const num = parseFloat(row[idx.total]);
-          total = isNaN(num)
-            ? gameData.reduce((sum, g) => sum + (g.points || 0), 0)
-            : num;
+          const val = parseFloat(row[idx.total]);
+          total = isNaN(val)
+            ? gameData.reduce((s, g) => s + (parseFloat(g.points) || 0), 0)
+            : val;
         } else {
-          total = gameData.reduce((sum, g) => sum + (g.points || 0), 0);
+          total = gameData.reduce((s, g) => s + (parseFloat(g.points) || 0), 0);
         }
 
         const overall = idx.overall !== -1 ? row[idx.overall] : "";
@@ -143,7 +147,7 @@
         players.push({ name, gameData, total, overall });
       }
 
-      // Sort by total desc
+      // Sort by total descending
       players.sort((a, b) => b.total - a.total);
 
       return { players };
@@ -157,38 +161,40 @@
         span.className = "badge silver"; span.textContent = "2nd";
       } else if (rank === 3) {
         span.className = "badge bronze"; span.textContent = "3rd";
-      } else { return; }
+      } else {
+        return;
+      }
       cell.appendChild(document.createTextNode(" "));
       cell.appendChild(span);
     }
 
-    function render(players, gameColumns) {
+    function render(players, gameCols) {
       const headerRow = document.getElementById("header-row");
       const tbody = document.querySelector("#leaderboard-table tbody");
 
-      // Build header dynamically
+      // Build header
       headerRow.innerHTML = `
         <th class="rank-col">#</th>
         <th class="player-col">Player</th>
-        ${gameColumns.map(g => `<th>${g}</th>`).join("")}
+        ${gameCols.map(g => `<th>${g}</th>`).join("")}
         <th>Total Points</th>
         <th>Overall Rank</th>
       `;
 
-      // Players
       tbody.innerHTML = "";
-      players.forEach((p, idx) => {
+      players.forEach((p, i) => {
         const tr = document.createElement("tr");
-        const rank = idx + 1;
+        const rank = i + 1;
 
         let html = `
           <td>${rank}</td>
           <td class="player-col">${p.name}</td>
         `;
 
-        // Game points
+        // Cell format: "Game Name (points)"
         for (const g of p.gameData) {
-          html += `<td>${g.points != null ? g.points : ""}</td>`;
+          const text = g.points !== "" ? `${g.label} (${g.points})` : "";
+          html += `<td>${text}</td>`;
         }
 
         html += `
@@ -198,9 +204,8 @@
 
         tr.innerHTML = html;
 
-        // Add medals to name cell
-        const nameCell = tr.children[1];
-        addMedal(rank, nameCell);
+        // Add medal to player name
+        addMedal(rank, tr.children[1]);
 
         tbody.appendChild(tr);
       });
@@ -212,14 +217,14 @@
         status.textContent = "Fetching latest scores...";
         const csv = await fetchCsv();
         const rows = parseCsv(csv);
-        const { players } = buildPlayers(rows);
 
-        // Build game column display names
         const header = rows[0];
-        const idx = detectColumns(header);
-        const gameCols = idx.games.map(g => g.name);
+        const cols = detectColumns(header);
 
-        render(players, gameCols);
+        const { players } = buildPlayers(rows);
+        const gameColNames = cols.games.map(g => g.name);
+
+        render(players, gameColNames);
 
         status.textContent =
           "Last updated " +
