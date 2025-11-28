@@ -87,27 +87,27 @@
       );
     }
 
+    // Find Player, Total Points, Overall Rank, and per-game score/points pairs
     function detectColumns(header) {
       const cols = {
         player: header.indexOf("Player"),
         total: header.indexOf("Total Points"),
         overall: header.indexOf("Overall Rank"),
-        games: []  // each item: { name: "Game 1", pointsIdx: x, rankIdx: y }
+        games: []  // each item: { name: "Game 1", scoreIdx: x, pointsIdx: y }
       };
 
       header.forEach((h, i) => {
         const cleaned = h.trim();
 
-        // Detect "* Points"
+        // Detect "* Points" but ignore "Total Points"
         if (/points$/i.test(cleaned) && cleaned.toLowerCase() !== "total points") {
           const base = cleaned.replace(/Points$/i, "").trim(); // "Game 1"
-          const rankHeader = base + " Rank";
-          const rankIdx = header.indexOf(rankHeader);
+          const scoreIdx = header.indexOf(base);              // column "Game 1"
 
           cols.games.push({
-            name: base,
-            pointsIdx: i,
-            rankIdx: rankIdx
+            name: base,        // used as column header
+            scoreIdx: scoreIdx,
+            pointsIdx: i       // this is the "* Points" column
           });
         }
       });
@@ -127,24 +127,33 @@
         const name = row[idx.player].trim();
 
         const gameData = idx.games.map(g => {
-          const rawPoints = row[g.pointsIdx] || "";
-          const rawRank = g.rankIdx !== -1 ? row[g.rankIdx] : "";
-
-          const pts = rawPoints.trim();
-          const rk = rawRank.trim();
+          const rawScore = g.scoreIdx !== -1 ? (row[g.scoreIdx] || "").trim() : "";
+          const rawPoints = g.pointsIdx !== -1 ? (row[g.pointsIdx] || "").trim() : "";
 
           let formatted = "";
-          if (pts !== "" && rk !== "") formatted = `${pts} (${rk})`;
-          else if (pts !== "") formatted = pts;
-          else formatted = "";
+          if (rawScore !== "" && rawPoints !== "") {
+            formatted = `${rawScore} (${rawPoints})`;
+          } else if (rawScore !== "") {
+            formatted = rawScore;
+          } else if (rawPoints !== "") {
+            formatted = rawPoints;
+          }
 
-          return { label: g.name, formatted, points: parseFloat(pts) || 0 };
+          const pointsNum = parseFloat(rawPoints);
+          return {
+            label: g.name,
+            formatted,
+            points: isNaN(pointsNum) ? 0 : pointsNum
+          };
         });
 
+        // Total Points, falling back to sum of per-game points if needed
         let total = 0;
         if (idx.total !== -1) {
           const num = parseFloat(row[idx.total]);
-          total = isNaN(num) ? gameData.reduce((s, g) => s + g.points, 0) : num;
+          total = isNaN(num)
+            ? gameData.reduce((s, g) => s + g.points, 0)
+            : num;
         } else {
           total = gameData.reduce((s, g) => s + g.points, 0);
         }
@@ -154,9 +163,10 @@
         players.push({ name, gameData, total, overall });
       }
 
+      // Sort by total descending
       players.sort((a, b) => b.total - a.total);
 
-      return { players };
+      return { players, cols: detectColumns(header) };
     }
 
     function addMedal(rank, cell) {
@@ -215,17 +225,17 @@
         const csv = await fetchCsv();
         const rows = parseCsv(csv);
 
-        const header = rows[0];
-        const cols = detectColumns(header);
-
-        const { players } = buildPlayers(rows);
+        const { players, cols } = buildPlayers(rows);
         const gameColNames = cols.games.map(g => g.name);
 
         render(players, gameColNames);
 
         status.textContent =
-          "Last updated " + new Date().toLocaleTimeString() +
-          " (auto refresh every " + POLL_INTERVAL_MS / 1000 + "s)";
+          "Last updated " +
+          new Date().toLocaleTimeString() +
+          " (auto refresh every " +
+          POLL_INTERVAL_MS / 1000 +
+          "s)";
       } catch (err) {
         console.error(err);
         status.textContent = "Error: " + err.message;
